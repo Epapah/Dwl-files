@@ -1045,6 +1045,8 @@ createmon(struct wl_listener *listener, void *data)
 	size_t i;
 	struct wlr_output_state state;
 	Monitor *m;
+	struct wlr_output_mode *output_mode;
+	int output_enable = 1;
 
 	if (!wlr_output_init_render(wlr_output, alloc, drw))
 		return;
@@ -1074,17 +1076,20 @@ createmon(struct wl_listener *listener, void *data)
 	}
 
 	/* The mode is a tuple of (width, height, refresh rate), and each
-	 * monitor supports only a specific set of modes. We just pick the
-	 * monitor's preferred mode; a more sophisticated compositor would let
-	 * the user configure it. */
-	wlr_output_state_set_mode(&state, wlr_output_preferred_mode(wlr_output));
+	 * monitor supports only a specific set of modes. By default we just pick
+	 * the monitor's preferred mode, but output_rules in config.h can pin a
+	 * resolution/refresh rate and can leave an output switched off. */
+	output_mode = output_startup_mode(wlr_output,
+			wlr_output_preferred_mode(wlr_output), &output_enable);
+	if (output_enable && output_mode)
+		wlr_output_state_set_mode(&state, output_mode);
 
 	/* Set up event listeners */
 	LISTEN(&wlr_output->events.frame, &m->frame, rendermon);
 	LISTEN(&wlr_output->events.destroy, &m->destroy, cleanupmon);
 	LISTEN(&wlr_output->events.request_state, &m->request_state, requestmonstate);
 
-	wlr_output_state_set_enabled(&state, 1);
+	wlr_output_state_set_enabled(&state, output_enable);
 	wlr_output_commit_state(wlr_output, &state);
 	wlr_output_state_finish(&state);
 
@@ -1110,10 +1115,15 @@ createmon(struct wl_listener *listener, void *data)
 	 * output (such as DPI, scale factor, manufacturer, etc).
 	 */
 	m->scene_output = wlr_scene_output_create(scene, wlr_output);
-	if (m->m.x == -1 && m->m.y == -1)
-		wlr_output_layout_add_auto(output_layout, wlr_output);
-	else
-		wlr_output_layout_add(output_layout, wlr_output, m->m.x, m->m.y);
+	/* wlr_output_layout_add does not like disabled outputs, so only add the
+	 * ones we actually enabled. updatemons() re-adds an output later if it
+	 * ever gets enabled. */
+	if (output_enable) {
+		if (m->m.x == -1 && m->m.y == -1)
+			wlr_output_layout_add_auto(output_layout, wlr_output);
+		else
+			wlr_output_layout_add(output_layout, wlr_output, m->m.x, m->m.y);
+	}
 }
 
 void
